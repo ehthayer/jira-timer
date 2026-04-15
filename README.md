@@ -60,12 +60,14 @@ jt set 1h30m            # Manually correct accumulated time
 
 `jt start ip` (alias: `jt start in-progress`) fetches tickets where `assignee = me` and `status = "In Progress"`, displays a numbered list, and starts the timer on your selection — no need to type or look up the key.
 
+`jt switch` always prompts to log banked time on the outgoing ticket when ≥ 1 minute has accumulated. The default is **yes** (pressing Enter logs the rounded time); only an explicit `n` skips logging. Ctrl-C cancels without logging. Accumulated time under 1 minute is silently dropped.
+
 ### Advanced Commands
 
 ```bash
 jt start ENG-123 --back 30m    # Backdate start by 30 minutes
 jt start ENG-123 --at 09:30    # Start from specific time today
-jt switch ENG-456              # Stop current, start new ticket
+jt switch ENG-456              # Stop current (prompts to log banked time), start new
 jt refresh                     # Force refresh Jira status cache
 jt move                        # Move current ticket to In Progress
 ```

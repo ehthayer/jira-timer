@@ -688,17 +688,21 @@ def cmd_switch(args):
         acc = state.get('accumulated', 0)
         print(f"{Colors.CYAN}Stopped {old_ticket} ({format_duration(acc)}){Colors.NC}")
 
-        # Offer to log time if there's meaningful accumulated time
+        # Offer to log time if there's meaningful accumulated time.
+        # Default is YES: pressing Enter logs. Only explicit 'n' skips.
+        # This avoids silently discarding banked time on a stray Enter.
+        # Ctrl-C / EOF still cancels (treated as explicit abort).
         if acc >= 60:
             logged_seconds = round_seconds(acc, CONFIG_ROUNDING, CONFIG_ROUND_DIRECTION)
             jira_duration = format_jira_duration(logged_seconds)
 
             try:
-                choice = input(f"Log {jira_duration} to {old_ticket}? [y/N] ").strip().lower()
+                choice = input(f"Log {jira_duration} to {old_ticket}? [Y/n] ").strip().lower()
             except (EOFError, KeyboardInterrupt):
                 choice = 'n'
+                print()
 
-            if choice == 'y':
+            if choice != 'n':
                 print(f"{Colors.CYAN}Logging {jira_duration} to {old_ticket}...{Colors.NC}")
                 result = run_jira_cmd(
                     ['issue', 'worklog', 'add', old_ticket, jira_duration, '--no-input'],
@@ -708,6 +712,8 @@ def cmd_switch(args):
                     print(f"{Colors.GREEN}Logged {jira_duration} to {old_ticket}{Colors.NC}")
                 else:
                     print(f"{Colors.RED}Failed to log time to {old_ticket}{Colors.NC}")
+            else:
+                print(f"{Colors.YELLOW}Skipped logging {jira_duration} on {old_ticket}{Colors.NC}")
 
         # Clear state before starting new
         state['ticket'] = None
