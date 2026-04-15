@@ -1,6 +1,4 @@
-#!/usr/bin/env python3
-"""
-jt-idle-monitor - Screen lock monitor for Jira Timer
+"""jt-idle-monitor - Screen lock monitor for Jira Timer.
 
 Runs as a launchd agent, checking every minute if the screen is locked.
 If locked for more than IDLE_THRESHOLD minutes, auto-pauses the timer.
@@ -18,8 +16,9 @@ from loguru import logger
 STATE_FILE = Path.home() / ".jira-timer.json"
 IDLE_STATE_FILE = Path.home() / ".jira-timer-idle.json"
 IDLE_THRESHOLD_MINUTES = 15
-SCRIPT_DIR = Path(__file__).resolve().parent.parent
-LOG_FILE = SCRIPT_DIR / "jt-idle-monitor.log"
+LOG_DIR = Path.home() / "Library" / "Logs" / "jira-timer"
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+LOG_FILE = LOG_DIR / "jt-idle-monitor.log"
 
 # Configure loguru: remove default stderr sink, add rotating log file
 logger.remove()

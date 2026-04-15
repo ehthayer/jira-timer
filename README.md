@@ -1,14 +1,14 @@
 # jt - Jira Timer
 
-A CLI tool to track time spent on Jira tickets with start/stop functionality, zsh prompt integration, and automatic idle detection.
+A **macOS-only** CLI tool to track time spent on Jira tickets with start/stop functionality, zsh prompt integration, and automatic idle detection (via Quartz screen-lock API + launchd).
 
 ## Installation
 
 ### Prerequisites
 
-1. Install jira-cli:
+1. Install [uv](https://docs.astral.sh/uv/) (Python package/tool manager) and jira-cli:
    ```bash
-   brew install jira-cli
+   brew install uv jira-cli
    ```
 
 2. Create an API token at https://id.atlassian.com/manage-profile/security/api-tokens and add to `~/.zshrc`:
@@ -24,7 +24,14 @@ A CLI tool to track time spent on Jira tickets with start/stop functionality, zs
 
 ### Install jt
 
-The tool is already installed at `~/.local/bin/jt`. Ensure `~/.local/bin` is in your PATH.
+From the repo root:
+```bash
+./install.sh
+```
+
+This runs `uv tool install .`, which creates an isolated venv with all dependencies (loguru, pyobjc-framework-Quartz) and installs the `jt` and `jt-idle-monitor` entry points into `~/.local/bin/`. It also installs the zsh plugin and loads the launchd agent. Ensure `~/.local/bin` is in your PATH.
+
+To upgrade after pulling new changes: re-run `./install.sh` (or `uv tool install --force .`).
 
 ### Enable Prompt Integration
 
@@ -106,7 +113,7 @@ jt log "Fixed authentication bug"
 - **Status Checking**: Warns if ticket isn't "In Progress" and offers to move it
 - **Status Caching**: Jira status cached for 5 minutes to reduce API calls
 - **Idle Detection**: Auto-pauses timer after 15 minutes of screen lock
-- **Idle Monitor Logging**: Structured log at `<project-dir>/jt-idle-monitor.log` (loguru, 1 MB rotation, 7-day retention)
+- **Idle Monitor Logging**: Structured log at `~/Library/Logs/jira-timer/jt-idle-monitor.log` (loguru, 1 MB rotation, 7-day retention)
 - **Context Switch Protection**: Warns before starting new ticket if timer running
 
 ## Configuration

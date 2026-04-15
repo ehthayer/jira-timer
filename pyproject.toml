@@ -1,0 +1,30 @@
+[project]
+name = "jira-timer"
+version = "0.2.0"
+description = "macOS CLI for tracking time against Jira tickets with screen-lock-aware idle detection"
+requires-python = ">=3.9"
+readme = "README.md"
+authors = [{ name = "Eric Thayer" }]
+dependencies = [
+    "loguru>=0.7",
+    "pyobjc-framework-Quartz>=10.0 ; sys_platform == 'darwin'",
+]
+
+[project.scripts]
+jt = "jira_timer.cli:main"
+jt-idle-monitor = "jira_timer.idle_monitor:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/jira_timer"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

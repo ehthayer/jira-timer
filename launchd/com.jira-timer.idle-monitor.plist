@@ -7,8 +7,7 @@
 
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/bin/python3</string>
-        <string>/Users/eht/.local/bin/jt-idle-monitor</string>
+        <string>__HOME__/.local/bin/jt-idle-monitor</string>
     </array>
 
     <key>StartInterval</key>
@@ -18,9 +17,9 @@
     <true/>
 
     <key>StandardOutPath</key>
-    <string>/tmp/jt-idle-monitor.log</string>
+    <string>__HOME__/Library/Logs/jira-timer/launchd.out.log</string>
 
     <key>StandardErrorPath</key>
-    <string>/tmp/jt-idle-monitor.err</string>
+    <string>__HOME__/Library/Logs/jira-timer/launchd.err.log</string>
 </dict>
 </plist>

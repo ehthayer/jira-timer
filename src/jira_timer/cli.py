@@ -1,8 +1,4 @@
-#!/usr/bin/env python3
-"""
-jt - Jira Timer
-A CLI tool to track time spent on Jira tickets
-"""
+"""jt - CLI tool to track time spent on Jira tickets."""
 
 import json
 import os

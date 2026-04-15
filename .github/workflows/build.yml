@@ -1,0 +1,64 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  test-and-package:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Install project (with dev group)
+        run: uv sync --group dev
+
+      - name: Run tests
+        run: uv run pytest -q
+
+      - name: Smoke-test uv tool install
+        run: |
+          uv tool install --force .
+          test -x "$HOME/.local/bin/jt"
+          test -x "$HOME/.local/bin/jt-idle-monitor"
+
+      - name: Stage tarball contents
+        run: |
+          VERSION=$(uv run python -c "import tomllib, pathlib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
+          echo "VERSION=$VERSION" >> "$GITHUB_ENV"
+          STAGE="jira-timer-$VERSION"
+          mkdir -p "dist-tarball/$STAGE"
+          cp -R src pyproject.toml uv.lock install.sh README.md ARCHITECTURE.md plugins launchd "dist-tarball/$STAGE/"
+          tar -czf "dist-tarball/jira-timer-$VERSION.tar.gz" -C dist-tarball "$STAGE"
+          shasum -a 256 "dist-tarball/jira-timer-$VERSION.tar.gz" > "dist-tarball/jira-timer-$VERSION.tar.gz.sha256"
+          ls -la dist-tarball/
+
+      - name: Upload tarball as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: jira-timer-${{ env.VERSION }}
+          path: |
+            dist-tarball/jira-timer-*.tar.gz
+            dist-tarball/jira-timer-*.tar.gz.sha256
+          retention-days: 90
+
+      - name: Attach tarball to GitHub Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist-tarball/jira-timer-*.tar.gz
+            dist-tarball/jira-timer-*.tar.gz.sha256
+          generate_release_notes: true

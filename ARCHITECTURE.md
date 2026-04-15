@@ -27,13 +27,15 @@
 
 | File | Purpose |
 |------|---------|
-| `~/.local/bin/jt` | Main CLI tool (Python) |
-| `~/.local/bin/jt-idle-monitor` | Screen lock detector (Python) |
+| `~/.local/bin/jt` | uv-generated entry point for `jira_timer.cli:main` |
+| `~/.local/bin/jt-idle-monitor` | uv-generated entry point for `jira_timer.idle_monitor:main` |
+| `~/.local/share/uv/tools/jira-timer/` | Isolated venv (loguru, pyobjc-framework-Quartz) |
 | `~/.jira-timer.json` | Runtime state |
 | `~/.jira-timer-idle.json` | Idle monitor state (lock tracking) |
 | `~/.oh-my-zsh/custom/plugins/jira-timer/jira-timer.plugin.zsh` | Prompt integration |
 | `~/Library/LaunchAgents/com.jira-timer.idle-monitor.plist` | launchd config for idle monitor |
-| `<project-dir>/jt-idle-monitor.log` | Idle monitor log (loguru, 1 MB rotation, 7-day retention) |
+| `~/Library/Logs/jira-timer/jt-idle-monitor.log` | Idle monitor log (loguru, 1 MB rotation, 7-day retention) |
+| `~/Library/Logs/jira-timer/launchd.{out,err}.log` | launchd stdout/stderr (crash diagnostics) |
 
 ## State File Schema
 
@@ -87,9 +89,22 @@
 
 Both fields are cleared when the screen is unlocked or the timer is resumed.
 
+## Source Layout
+
+```
+src/jira_timer/
+├── __init__.py
+├── cli.py            # jt entry point (main)
+└── idle_monitor.py   # jt-idle-monitor entry point (main)
+pyproject.toml        # project metadata, deps, [project.scripts]
+uv.lock               # pinned resolution
+```
+
+Packaged with [hatchling](https://hatch.pypa.io/) and installed via `uv tool install .`, which builds a wheel and drops the two entry-point shims into `~/.local/bin/`.
+
 ## jt CLI (`~/.local/bin/jt`)
 
-Python script (~630 lines) providing all timer commands.
+Python module `jira_timer.cli` providing all timer commands (~800 lines).
 
 ### Key Functions
 
@@ -156,16 +171,18 @@ RPROMPT='$(jira_timer_prompt_info) '"$RPROMPT"
 
 ## Idle Monitor (`~/.local/bin/jt-idle-monitor`)
 
-Python script run by launchd every 60 seconds. Uses loguru for structured logging.
+Python module `jira_timer.idle_monitor` run by launchd every 60 seconds. Uses loguru for structured logging.
 
 ### Screen Lock Detection
 
-Uses macOS Quartz framework (falls back to `pgrep ScreenSaverEngine` if Quartz unavailable):
+Uses the macOS Quartz framework via `pyobjc-framework-Quartz` (bundled in the uv tool venv, so always available):
 ```python
 import Quartz
 session = Quartz.CGSessionCopyCurrentDictionary()
 is_locked = session.get('CGSSessionScreenIsLocked', False)
 ```
+
+Falls back to `pgrep ScreenSaverEngine` only if the Quartz import fails. Note: this fallback does **not** detect locks that skip the screensaver (e.g. hardened auto-lock policies) — rely on Quartz being present.
 
 ### Behavior
 
@@ -190,7 +207,7 @@ Each invocation follows this decision tree:
 
 ### Logging
 
-Uses loguru with a rotating log file at `<project-dir>/jt-idle-monitor.log`:
+Uses loguru with a rotating log file at `~/Library/Logs/jira-timer/jt-idle-monitor.log`:
 
 - **Rotation**: 1 MB
 - **Retention**: 7 days
@@ -206,17 +223,16 @@ Uses loguru with a rotating log file at `<project-dir>/jt-idle-monitor.log`:
     <string>com.jira-timer.idle-monitor</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/bin/python3</string>
-        <string>/Users/eht/.local/bin/jt-idle-monitor</string>
+        <string>~/.local/bin/jt-idle-monitor</string>
     </array>
     <key>StartInterval</key>
     <integer>60</integer>
     <key>RunAtLoad</key>
     <true/>
     <key>StandardOutPath</key>
-    <string>/tmp/jt-idle-monitor.log</string>
+    <string>~/Library/Logs/jira-timer/launchd.out.log</string>
     <key>StandardErrorPath</key>
-    <string>/tmp/jt-idle-monitor.err</string>
+    <string>~/Library/Logs/jira-timer/launchd.err.log</string>
 </dict>
 ```
 
@@ -231,11 +247,11 @@ launchctl unload ~/Library/LaunchAgents/com.jira-timer.idle-monitor.plist
 launchctl load ~/Library/LaunchAgents/com.jira-timer.idle-monitor.plist
 
 # View application log (structured, loguru)
-tail -f <project-dir>/jt-idle-monitor.log
+tail -f ~/Library/Logs/jira-timer/jt-idle-monitor.log
 
 # View launchd stdout/stderr (unstructured, for crash diagnostics)
-tail -f /tmp/jt-idle-monitor.log
-tail -f /tmp/jt-idle-monitor.err
+tail -f ~/Library/Logs/jira-timer/launchd.out.log
+tail -f ~/Library/Logs/jira-timer/launchd.err.log
 ```
 
 ## Time Calculations
