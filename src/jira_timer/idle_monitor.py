@@ -7,10 +7,15 @@ If locked for more than IDLE_THRESHOLD minutes, auto-pauses the timer.
 import json
 import os
 import sys
+import tempfile
 import time
 from pathlib import Path
+from typing import NamedTuple, Optional
 
+import Quartz
 from loguru import logger
+
+from jira_timer import cli as _cli
 
 # Configuration
 STATE_FILE = Path.home() / ".jira-timer.json"
@@ -30,71 +35,85 @@ logger.add(
 )
 
 def is_screen_locked():
-    """Check if the macOS screen is locked."""
-    try:
-        import Quartz
-        session_dict = Quartz.CGSessionCopyCurrentDictionary()
-        if session_dict:
-            locked = session_dict.get('CGSSessionScreenIsLocked', False)
-            logger.debug("Quartz screen locked: {}", locked)
-            return locked
-        logger.debug("Quartz session dict is None, assuming unlocked")
-        return False
-    except ImportError:
-        # Fallback: check if screensaver is running
-        logger.debug("Quartz unavailable, falling back to pgrep ScreenSaverEngine")
-        import subprocess
-        result = subprocess.run(
-            ['pgrep', '-x', 'ScreenSaverEngine'],
-            capture_output=True
-        )
-        locked = result.returncode == 0
-        logger.debug("ScreenSaverEngine pgrep locked: {}", locked)
+    """Check if the macOS screen is locked via Quartz.
+
+    pyobjc-framework-Quartz is a hard dependency of the uv tool install,
+    so the previous pgrep ScreenSaverEngine fallback has been removed —
+    it couldn't detect locks from hardened auto-lock policies that skip
+    the screensaver, so its presence silently masked the lock.
+    """
+    session_dict = Quartz.CGSessionCopyCurrentDictionary()
+    if session_dict:
+        locked = bool(session_dict.get("CGSSessionScreenIsLocked", False))
+        logger.debug("Quartz screen locked: {}", locked)
         return locked
+    logger.debug("Quartz session dict is None, assuming unlocked")
+    return False
 
 def read_timer_state():
-    """Read the main timer state."""
-    if not STATE_FILE.exists():
-        logger.debug("Timer state file does not exist")
-        return None
-    try:
-        with open(STATE_FILE, 'r') as f:
-            state = json.load(f)
-        logger.debug("Timer state: ticket={}, start_time={}, accumulated={}, paused={}",
-                      state.get('ticket'), state.get('start_time'),
-                      state.get('accumulated'), state.get('paused'))
-        return state
-    except Exception as e:
-        logger.error("Failed to read timer state: {}", e)
-        return None
+    """Read the main timer state via the cli helpers (atomic + coerced)."""
+    # Align STATE_FILE override for tests that monkeypatch this module's STATE_FILE.
+    _cli.STATE_FILE = STATE_FILE
+    state = _cli.load_state()
+    logger.debug(
+        "Timer state: ticket={}, start_time={}, accumulated={}, paused={}",
+        state.get("ticket"), state.get("start_time"),
+        state.get("accumulated"), state.get("paused"),
+    )
+    return state
+
 
 def write_timer_state(state):
-    """Write the main timer state (mode 0600)."""
-    with open(STATE_FILE, 'w') as f:
-        json.dump(state, f)
-    os.chmod(STATE_FILE, 0o600)
-    logger.debug("Wrote timer state: paused={}, accumulated={}", state.get('paused'), state.get('accumulated'))
+    """Write the main timer state atomically with mode 0600."""
+    _cli.STATE_FILE = STATE_FILE
+    _cli.save_state(state)
+    logger.debug(
+        "Wrote timer state: paused={}, accumulated={}",
+        state.get("paused"), state.get("accumulated"),
+    )
+
 
 def read_idle_state():
     """Read the idle monitor state."""
     if not IDLE_STATE_FILE.exists():
         logger.debug("Idle state file does not exist, using defaults")
-        return {'locked_since': None, 'paused_at': None}
+        return {"locked_since": None, "paused_at": None}
     try:
-        with open(IDLE_STATE_FILE, 'r') as f:
+        with open(IDLE_STATE_FILE, "r") as f:
             state = json.load(f)
-        logger.debug("Idle state: locked_since={}, paused_at={}", state.get('locked_since'), state.get('paused_at'))
+        logger.debug(
+            "Idle state: locked_since={}, paused_at={}",
+            state.get("locked_since"), state.get("paused_at"),
+        )
         return state
-    except Exception as e:
+    except (OSError, json.JSONDecodeError) as e:
         logger.error("Failed to read idle state: {}", e)
-        return {'locked_since': None, 'paused_at': None}
+        return {"locked_since": None, "paused_at": None}
+
 
 def write_idle_state(state):
-    """Write the idle monitor state (mode 0600)."""
-    with open(IDLE_STATE_FILE, 'w') as f:
-        json.dump(state, f)
-    os.chmod(IDLE_STATE_FILE, 0o600)
-    logger.debug("Wrote idle state: locked_since={}, paused_at={}", state.get('locked_since'), state.get('paused_at'))
+    """Write idle state atomically with mode 0600 (temp file + os.replace)."""
+    IDLE_STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(
+        prefix=".jira-timer-idle.", suffix=".tmp", dir=str(IDLE_STATE_FILE.parent)
+    )
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(state, f)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp_path, 0o600)
+        os.replace(tmp_path, IDLE_STATE_FILE)
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
+    logger.debug(
+        "Wrote idle state: locked_since={}, paused_at={}",
+        state.get("locked_since"), state.get("paused_at"),
+    )
 
 def send_notification(title, message):
     """Send a macOS notification."""
@@ -129,6 +148,100 @@ def format_duration(seconds):
         return f"{hours}h {minutes}m"
     return f"{minutes}m"
 
+
+class Transition(NamedTuple):
+    """Planned outcome of one idle-monitor tick.
+
+    - timer_state: new timer state to persist, or None if unchanged.
+    - idle_state:  new idle state to persist (always written if not None).
+    - notifications: list of (title, message) tuples to surface to the user.
+    """
+    timer_state: Optional[dict]
+    idle_state: Optional[dict]
+    notifications: list
+
+
+def compute_transition(
+    now: int,
+    locked: bool,
+    timer_state: Optional[dict],
+    idle_state: dict,
+    threshold_seconds: int = IDLE_THRESHOLD_MINUTES * 60,
+) -> Transition:
+    """Pure state-machine for one idle-monitor tick.
+
+    Inputs are snapshots; outputs describe what the caller should write and
+    which notifications to send. No I/O, no clock reads, no side effects —
+    suitable for exhaustive testing.
+    """
+    empty_idle = {"locked_since": None, "paused_at": None}
+
+    # Case A: no active ticket — clear idle state, nothing else.
+    if not timer_state or not timer_state.get("ticket"):
+        return Transition(None, empty_idle, [])
+
+    ticket = timer_state["ticket"]
+    start_time = timer_state.get("start_time")
+
+    # Case B: timer already paused/stopped.
+    if not start_time:
+        notifications = []
+        if not locked and idle_state.get("paused_at"):
+            accumulated = timer_state.get("accumulated", 0)
+            notifications.append((
+                "Jira Timer",
+                f"Welcome back! {ticket} paused at {format_duration(accumulated)}",
+            ))
+        return Transition(None, empty_idle, notifications)
+
+    # Case C: timer running + screen locked.
+    if locked:
+        if not idle_state.get("locked_since"):
+            return Transition(
+                None,
+                {**idle_state, "locked_since": now},
+                [],
+            )
+
+        locked_duration = now - idle_state["locked_since"]
+        if locked_duration >= threshold_seconds and not idle_state.get("paused_at"):
+            elapsed_at_lock = idle_state["locked_since"] - int(start_time)
+            accumulated = timer_state.get("accumulated", 0)
+            total_at_pause = accumulated + elapsed_at_lock
+            new_timer = {
+                **timer_state,
+                "start_time": None,
+                "accumulated": total_at_pause,
+                "paused": True,
+                "paused_reason": "idle",
+            }
+            new_idle = {**idle_state, "paused_at": now}
+            notifications = [(
+                "Jira Timer Paused",
+                f"Timer paused at {format_duration(total_at_pause)} "
+                f"(idle {threshold_seconds // 60}m)",
+            )]
+            return Transition(new_timer, new_idle, notifications)
+
+        # Still locked, under threshold — no change.
+        return Transition(None, None, [])
+
+    # Case D: timer running + screen unlocked.
+    if idle_state.get("locked_since"):
+        notifications = []
+        if idle_state.get("paused_at"):
+            accumulated = timer_state.get("accumulated", 0)
+            idle_minutes = (now - idle_state["locked_since"]) // 60
+            notifications.append((
+                "Jira Timer",
+                f"Welcome back! {ticket} paused at {format_duration(accumulated)} "
+                f"(was idle {idle_minutes}m)",
+            ))
+        return Transition(None, empty_idle, notifications)
+
+    return Transition(None, None, [])
+
+
 def main():
     now = int(time.time())
     locked = is_screen_locked()
@@ -137,96 +250,22 @@ def main():
     idle_state = read_idle_state()
     timer_state = read_timer_state()
 
-    # No timer running, nothing to do
-    if not timer_state or not timer_state.get('ticket'):
-        logger.info("No active ticket, clearing idle state")
-        idle_state['locked_since'] = None
-        idle_state['paused_at'] = None
-        write_idle_state(idle_state)
-        return
+    transition = compute_transition(now, locked, timer_state, idle_state)
 
-    ticket = timer_state.get('ticket')
+    if transition.timer_state is not None:
+        ticket = transition.timer_state.get("ticket")
+        accumulated = transition.timer_state.get("accumulated")
+        logger.info(
+            "Auto-pausing {}: accumulated={}s ({})",
+            ticket, accumulated, format_duration(accumulated),
+        )
+        write_timer_state(transition.timer_state)
 
-    # Timer is already stopped/paused
-    start_time = timer_state.get('start_time')
-    if not start_time or start_time == 'None':
-        if not locked and idle_state.get('paused_at'):
-            # Screen unlocked after idle pause - send welcome back notification
-            accumulated = timer_state.get('accumulated', 0)
-            logger.info("Welcome back: {} paused at {}", ticket, format_duration(accumulated))
-            send_notification(
-                "Jira Timer",
-                f"Welcome back! {ticket} paused at {format_duration(accumulated)}"
-            )
-        logger.info("Timer paused/stopped for {}, clearing idle state", ticket)
-        idle_state['locked_since'] = None
-        idle_state['paused_at'] = None
-        write_idle_state(idle_state)
-        return
+    if transition.idle_state is not None:
+        write_idle_state(transition.idle_state)
 
-    if locked:
-        # Screen is locked
-        if not idle_state.get('locked_since'):
-            # Just became locked
-            logger.info("Screen just locked, recording lock time for {}", ticket)
-            idle_state['locked_since'] = now
-            write_idle_state(idle_state)
-            return
-
-        # Check if we've been locked long enough
-        locked_duration = now - idle_state['locked_since']
-        threshold_seconds = IDLE_THRESHOLD_MINUTES * 60
-        logger.info("Locked for {}s (threshold {}s), paused_at={}",
-                     locked_duration, threshold_seconds, idle_state.get('paused_at'))
-
-        if locked_duration >= threshold_seconds and not idle_state.get('paused_at'):
-            # Time to auto-pause
-            # Calculate time at pause point (when we first detected lock)
-            elapsed_at_lock = idle_state['locked_since'] - int(start_time)
-            accumulated = timer_state.get('accumulated', 0)
-            total_at_pause = accumulated + elapsed_at_lock
-
-            logger.info("Auto-pausing {}: elapsed_at_lock={}s, accumulated={}s, total={}s ({})",
-                         ticket, elapsed_at_lock, accumulated, total_at_pause, format_duration(total_at_pause))
-
-            # Update timer state to paused
-            timer_state['start_time'] = None
-            timer_state['accumulated'] = total_at_pause
-            timer_state['paused'] = True
-            timer_state['paused_reason'] = 'idle'
-            write_timer_state(timer_state)
-
-            idle_state['paused_at'] = now
-            write_idle_state(idle_state)
-
-            # Send notification
-            send_notification(
-                "Jira Timer Paused",
-                f"Timer paused at {format_duration(total_at_pause)} (idle {IDLE_THRESHOLD_MINUTES}m)"
-            )
-    else:
-        # Screen is unlocked
-        if idle_state.get('locked_since'):
-            locked_duration = now - idle_state['locked_since']
-
-            if idle_state.get('paused_at'):
-                # Was paused due to idle, now unlocked
-                accumulated = timer_state.get('accumulated', 0)
-                idle_minutes = locked_duration // 60
-                logger.info("Unlock after idle pause: {} paused at {}, idle {}m",
-                             ticket, format_duration(accumulated), idle_minutes)
-
-                send_notification(
-                    "Jira Timer",
-                    f"Welcome back! {ticket} paused at {format_duration(accumulated)} (was idle {idle_minutes}m)"
-                )
-            else:
-                logger.info("Unlock after {}s locked (below threshold), no action", locked_duration)
-
-            # Clear idle state
-            idle_state['locked_since'] = None
-            idle_state['paused_at'] = None
-            write_idle_state(idle_state)
+    for title, message in transition.notifications:
+        send_notification(title, message)
 
 if __name__ == '__main__':
     main()

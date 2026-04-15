@@ -1,10 +1,12 @@
 """jt - CLI tool to track time spent on Jira tickets."""
 
+import copy
 import json
 import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -42,39 +44,103 @@ def load_jira_token():
             return token
     return None
 
-def init_state():
-    """Initialize state file if it doesn't exist"""
-    if not STATE_FILE.exists():
-        state = {
-            "ticket": None,
-            "start_time": None,
-            "accumulated": 0,
-            "paused": False,
-            "paused_reason": None,
-            "status_cache": {},
-            "config": {
-                "rounding": CONFIG_ROUNDING,
-                "roundDirection": CONFIG_ROUND_DIRECTION
-            }
-        }
-        save_state(state)
-    return load_state()
+_DEFAULT_STATE = {
+    "ticket": None,
+    "start_time": None,
+    "accumulated": 0,
+    "paused": False,
+    "paused_reason": None,
+    "status_cache": {},
+    "config": {
+        "rounding": CONFIG_ROUNDING,
+        "roundDirection": CONFIG_ROUND_DIRECTION,
+    },
+}
+
+
+def _default_state():
+    return copy.deepcopy(_DEFAULT_STATE)
+
+
+def _coerce_state(state):
+    """Normalize types for fields that downstream code does arithmetic on.
+
+    Historical bug: some code paths wrote `start_time` as the string 'None'
+    (see idle_monitor.py pre-refactor), which then crashed or silently
+    misbehaved when subtracted from an int. Coerce here so every caller
+    can treat the loaded dict as having the documented types.
+    """
+    if not isinstance(state, dict):
+        return _default_state()
+
+    st = state.get("start_time")
+    if st in (None, "None", ""):
+        state["start_time"] = None
+    elif not isinstance(st, int):
+        try:
+            state["start_time"] = int(st)
+        except (TypeError, ValueError):
+            state["start_time"] = None
+
+    acc = state.get("accumulated", 0)
+    if not isinstance(acc, int):
+        try:
+            state["accumulated"] = int(acc)
+        except (TypeError, ValueError):
+            state["accumulated"] = 0
+
+    return state
+
 
 def load_state():
-    """Load state from file"""
+    """Load state from file. Returns a fresh default dict (in-memory, no
+    file write) if the file is missing or corrupt. Corrupt files are
+    renamed to <file>.corrupt.<epoch> for forensics rather than deleted."""
     if not STATE_FILE.exists():
-        return init_state()
+        return _default_state()
     try:
-        with open(STATE_FILE, 'r') as f:
-            return json.load(f)
-    except:
-        return init_state()
+        with open(STATE_FILE, "r") as f:
+            return _coerce_state(json.load(f))
+    except (OSError, json.JSONDecodeError):
+        try:
+            backup = STATE_FILE.with_suffix(f".json.corrupt.{int(time.time())}")
+            STATE_FILE.rename(backup)
+        except OSError:
+            pass
+        return _default_state()
+
+
+def init_state():
+    """Ensure a state file exists on disk; return the loaded state."""
+    if not STATE_FILE.exists():
+        save_state(_default_state())
+    return load_state()
+
 
 def save_state(state):
-    """Save state to file with mode 0600 (contains ticket keys; not world-readable)."""
-    with open(STATE_FILE, 'w') as f:
-        json.dump(state, f, indent=2)
-    os.chmod(STATE_FILE, 0o600)
+    """Atomically write state with mode 0600 (temp file + os.replace).
+
+    Prevents partial reads if another process (CLI or idle monitor) opens
+    the file while a write is in progress. 0600 keeps ticket keys off
+    world-readable systems.
+    """
+    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(
+        prefix=".jira-timer.", suffix=".tmp", dir=str(STATE_FILE.parent)
+    )
+    try:
+        with os.fdopen(fd, "w") as f:
+            json.dump(state, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.chmod(tmp_path, 0o600)
+        os.replace(tmp_path, STATE_FILE)
+    except Exception:
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+        raise
 
 def format_duration(seconds):
     """Format seconds to human readable"""
