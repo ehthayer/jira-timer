@@ -202,8 +202,13 @@ Each invocation follows this decision tree:
      - Send "Timer Paused" notification
 4. **Timer running + screen unlocked**:
    - If `locked_since` is set (was recently locked):
-     - If `paused_at` is set → send "welcome back" notification
-     - Clear idle state
+     - If `paused_at` is set (idle pause fired earlier) → send "welcome back" notification with idle duration
+     - Otherwise (unlocked before threshold): clear idle state silently, no notification
+   - If `locked_since` was not set: no-op
+
+Note: the welcome-back notification fires on `paused_at` being set — i.e. the auto-pause ran at some point — not on the `paused` bool. A manually-stopped timer that happens to have its screen locked and unlocked will not trigger the welcome-back message.
+
+The state machine is implemented as a pure function `compute_transition()` in `idle_monitor.py` (no I/O, no clock reads) so it can be exhaustively unit-tested. `main()` is just I/O glue around it.
 
 ### Logging
 

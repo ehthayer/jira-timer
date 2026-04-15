@@ -125,10 +125,16 @@ jt log "Fixed authentication bug"
 
 ## Configuration
 
-Settings stored in `~/.jira-timer.json`:
+Runtime state and user settings both live in `~/.jira-timer.json`. The file is written atomically and with mode `0600`. Full schema (see `ARCHITECTURE.md` for field-by-field semantics):
 
 ```json
 {
+  "ticket": "ENG-123",
+  "start_time": 1705123456,
+  "accumulated": 3600,
+  "paused": false,
+  "paused_reason": null,
+  "status_cache": { "ENG-123": { "status": "In Progress", "timestamp": 1705123456 } },
   "config": {
     "rounding": 15,
     "roundDirection": "nearest"
@@ -136,5 +142,7 @@ Settings stored in `~/.jira-timer.json`:
 }
 ```
 
-- `rounding`: Minutes to round to (0 = no rounding)
-- `roundDirection`: "up", "down", or "nearest"
+Only the `config` subtree is user-editable. The rest is managed by `jt` — edit with care.
+
+- `config.rounding`: Minutes to round to on `jt log` (0 = no rounding)
+- `config.roundDirection`: `"up"`, `"down"`, or `"nearest"`

@@ -6,7 +6,6 @@ If locked for more than IDLE_THRESHOLD minutes, auto-pauses the timer.
 
 import json
 import os
-import sys
 import tempfile
 import time
 from pathlib import Path
@@ -79,7 +78,7 @@ def read_idle_state():
         logger.debug("Idle state file does not exist, using defaults")
         return {"locked_since": None, "paused_at": None}
     try:
-        with open(IDLE_STATE_FILE, "r") as f:
+        with open(IDLE_STATE_FILE) as f:
             state = json.load(f)
         logger.debug(
             "Idle state: locked_since={}, paused_at={}",

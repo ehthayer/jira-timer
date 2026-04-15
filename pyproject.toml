@@ -1,14 +1,32 @@
 [project]
 name = "jira-timer"
-version = "0.2.2"
+version = "0.3.0"
 description = "macOS CLI for tracking time against Jira tickets with screen-lock-aware idle detection"
 requires-python = ">=3.9"
 readme = "README.md"
+license = "MIT"
 authors = [{ name = "Eric Thayer" }]
+keywords = ["jira", "timer", "time-tracking", "cli", "macos", "launchd"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: MacOS :: MacOS X",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Office/Business",
+    "Topic :: Utilities",
+]
 dependencies = [
     "loguru>=0.7",
     "pyobjc-framework-Quartz>=10.0 ; sys_platform == 'darwin'",
 ]
+
+[project.urls]
+Homepage = "https://github.com/ehthayer/jira-timer"
+Repository = "https://github.com/ehthayer/jira-timer"
+Issues = "https://github.com/ehthayer/jira-timer/issues"
 
 [project.scripts]
 jt = "jira_timer.cli:main"
@@ -17,6 +35,7 @@ jt-idle-monitor = "jira_timer.idle_monitor:main"
 [dependency-groups]
 dev = [
     "pytest>=8",
+    "ruff>=0.6",
 ]
 
 [build-system]
@@ -28,3 +47,16 @@ packages = ["src/jira_timer"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+# Enable: pycodestyle errors, pyflakes, isort, bugbear, pyupgrade.
+# Keep it lightweight — this is a personal CLI, not a library.
+select = ["E", "F", "I", "B", "UP"]
+ignore = [
+    "E501",  # line-too-long — many strings / f-strings are unavoidably long
+    "B008",  # function calls in defaults — Path.home() pattern is deliberate
+]

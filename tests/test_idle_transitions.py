@@ -4,7 +4,6 @@ The function under test is pure: given (now, locked, timer_state, idle_state),
 it returns a Transition describing what to persist and which notifications to
 send. No I/O, no Quartz, no clocks.
 """
-import pytest
 
 from jira_timer.idle_monitor import IDLE_THRESHOLD_MINUTES, compute_transition
 

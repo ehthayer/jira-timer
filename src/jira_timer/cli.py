@@ -99,7 +99,7 @@ def load_state():
     if not STATE_FILE.exists():
         return _default_state()
     try:
-        with open(STATE_FILE, "r") as f:
+        with open(STATE_FILE) as f:
             return _coerce_state(json.load(f))
     except (OSError, json.JSONDecodeError):
         try:
@@ -212,7 +212,7 @@ def validate_ticket_id(ticket):
         ticket = ticket.upper()
     else:
         print(f"{Colors.RED}Invalid ticket ID: {ticket}{Colors.NC}")
-        print(f"Expected format: PROJECT-123 (e.g., ENG-456, DATA-78)")
+        print("Expected format: PROJECT-123 (e.g., ENG-456, DATA-78)")
         sys.exit(1)
 
     # Verify ticket exists in Jira
@@ -390,7 +390,7 @@ def pick_in_progress_ticket():
     print()
     for i, (key, summary) in enumerate(tickets, 1):
         print(f"  {i}) {Colors.CYAN}{key}{Colors.NC} {summary}")
-    print(f"  0) Cancel")
+    print("  0) Cancel")
     print()
 
     try:
@@ -703,7 +703,7 @@ def cmd_set(args):
 
     if not args:
         print(f"{Colors.RED}Usage: jt set <duration>{Colors.NC}")
-        print(f"Examples: jt set 0, jt set 30m, jt set 1h15m")
+        print("Examples: jt set 0, jt set 30m, jt set 1h15m")
         sys.exit(1)
 
     duration_str = args[0]
