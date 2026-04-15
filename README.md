@@ -48,12 +48,17 @@ Restart your terminal or run `source ~/.zshrc`.
 
 ```bash
 jt start ENG-123        # Start tracking time on a ticket
+jt start ip             # Pick from your assigned In Progress tickets
 jt start                # Resume paused ticket (if one exists)
 jt stop                 # Pause timer, bank accumulated time
+jt                      # Show current ticket and time (same as `jt status`)
 jt status               # Show current ticket and time
 jt log "what I did"     # Log time to Jira worklog and reset
-jt discard              # Discard accumulated time without logging
+jt set 0                # Reset accumulated time to zero (replaces the old `discard`)
+jt set 1h30m            # Manually correct accumulated time
 ```
+
+`jt start ip` (alias: `jt start in-progress`) fetches tickets where `assignee = me` and `status = "In Progress"`, displays a numbered list, and starts the timer on your selection — no need to type or look up the key.
 
 ### Advanced Commands
 

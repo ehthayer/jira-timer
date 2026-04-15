@@ -122,7 +122,7 @@ Python module `jira_timer.cli` providing all timer commands (~800 lines).
 
 ### Ticket Validation
 
-`validate_ticket_id()` runs on `start` and `switch` (skipped on resume). Three checks:
+`validate_ticket_id()` runs on `start` and `switch` (skipped on resume, and skipped when `start in-progress`/`start ip` is used since the ticket was just confirmed via the picker). Three checks:
 
 1. **Format** — must match `PROJECT-123` pattern (`^[A-Z][A-Z0-9]+-\d+$`)
 2. **Existence** — calls `jira issue view` and fails if ticket not found
