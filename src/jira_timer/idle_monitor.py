@@ -69,9 +69,10 @@ def read_timer_state():
         return None
 
 def write_timer_state(state):
-    """Write the main timer state."""
+    """Write the main timer state (mode 0600)."""
     with open(STATE_FILE, 'w') as f:
         json.dump(state, f)
+    os.chmod(STATE_FILE, 0o600)
     logger.debug("Wrote timer state: paused={}, accumulated={}", state.get('paused'), state.get('accumulated'))
 
 def read_idle_state():
@@ -89,9 +90,10 @@ def read_idle_state():
         return {'locked_since': None, 'paused_at': None}
 
 def write_idle_state(state):
-    """Write the idle monitor state."""
+    """Write the idle monitor state (mode 0600)."""
     with open(IDLE_STATE_FILE, 'w') as f:
         json.dump(state, f)
+    os.chmod(IDLE_STATE_FILE, 0o600)
     logger.debug("Wrote idle state: locked_since={}, paused_at={}", state.get('locked_since'), state.get('paused_at'))
 
 def send_notification(title, message):
@@ -105,11 +107,17 @@ def send_notification(title, message):
             capture_output=True
         )
         if result.returncode != 0:
-            # Fallback to osascript
-            subprocess.run([
-                'osascript', '-e',
-                f'display notification "{message}" with title "{title}"'
-            ])
+            # Fallback to osascript. The script is built from a static
+            # template and the user-controlled pieces (title, message) are
+            # embedded via AppleScript string literals with proper escaping
+            # so that embedded quotes / backslashes can't break out.
+            def _as_escape(s: str) -> str:
+                return s.replace("\\", "\\\\").replace('"', '\\"')
+            script = (
+                f'display notification "{_as_escape(message)}" '
+                f'with title "{_as_escape(title)}"'
+            )
+            subprocess.run(['osascript', '-e', script])
     except Exception as e:
         logger.error("Failed to send notification: {}", e)
 

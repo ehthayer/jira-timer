@@ -1,9 +1,8 @@
 """Tests for pure functions in jira_timer.cli — no Jira/state-file I/O."""
-import re
-
 import pytest
 
 from jira_timer.cli import (
+    TICKET_ID_REGEX,
     format_duration,
     format_jira_duration,
     is_in_progress,
@@ -110,14 +109,12 @@ class TestIsInProgress:
 
 
 class TestTicketIdRegex:
-    """Regex check only — validate_ticket_id() itself calls Jira, so test the pattern."""
-
-    PATTERN = re.compile(r"^[a-zA-Z][a-zA-Z0-9]+-\d+$")
+    """Regex check — imported from jira_timer.cli so the test tracks the source."""
 
     @pytest.mark.parametrize("ticket", ["ENG-123", "DATA-7", "proj2-45", "AB-1"])
     def test_valid(self, ticket):
-        assert self.PATTERN.match(ticket)
+        assert TICKET_ID_REGEX.match(ticket)
 
     @pytest.mark.parametrize("ticket", ["123", "ENG", "ENG-", "-123", "1ENG-5", "ENG_123"])
     def test_invalid(self, ticket):
-        assert not self.PATTERN.match(ticket)
+        assert not TICKET_ID_REGEX.match(ticket)

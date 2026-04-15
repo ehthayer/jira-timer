@@ -14,6 +14,9 @@ CONFIG_ROUNDING = 15  # minutes
 CONFIG_ROUND_DIRECTION = "nearest"  # up, down, nearest
 STATUS_CACHE_SECONDS = 300  # 5 minutes
 
+# Single source of truth: ticket ID regex (also imported by tests).
+TICKET_ID_REGEX = re.compile(r'^[a-zA-Z][a-zA-Z0-9]+-\d+$')
+
 # Colors
 class Colors:
     RED = '\033[0;31m'
@@ -47,6 +50,7 @@ def init_state():
             "start_time": None,
             "accumulated": 0,
             "paused": False,
+            "paused_reason": None,
             "status_cache": {},
             "config": {
                 "rounding": CONFIG_ROUNDING,
@@ -67,9 +71,10 @@ def load_state():
         return init_state()
 
 def save_state(state):
-    """Save state to file"""
+    """Save state to file with mode 0600 (contains ticket keys; not world-readable)."""
     with open(STATE_FILE, 'w') as f:
         json.dump(state, f, indent=2)
+    os.chmod(STATE_FILE, 0o600)
 
 def format_duration(seconds):
     """Format seconds to human readable"""
@@ -137,7 +142,7 @@ def parse_duration(duration_str):
 def validate_ticket_id(ticket):
     """Validate ticket format, verify it exists in Jira, and confirm with user.
     Also parses status, caches it, and offers to move to In Progress."""
-    if re.match(r'^[a-zA-Z][a-zA-Z0-9]+-\d+$', ticket):
+    if TICKET_ID_REGEX.match(ticket):
         ticket = ticket.upper()
     else:
         print(f"{Colors.RED}Invalid ticket ID: {ticket}{Colors.NC}")
@@ -598,12 +603,15 @@ def cmd_log(args):
     if result.returncode == 0:
         print(f"{Colors.GREEN}Logged {jira_duration} to {ticket}{Colors.NC}")
 
-        # Update remaining estimate if specified
+        # Update remaining estimate if specified.
+        # Use json.dumps so user-supplied `remaining` can't break out of the
+        # JSON payload (e.g. an embedded `"` would otherwise inject fields).
         if remaining:
             print(f"{Colors.CYAN}Updating remaining estimate to {remaining}...{Colors.NC}")
+            payload = json.dumps({"remainingEstimate": remaining})
             result = run_jira_cmd([
                 'issue', 'edit', ticket,
-                '--custom', f'timetracking={{"remainingEstimate":"{remaining}"}}',
+                '--custom', f'timetracking={payload}',
                 '--no-input'
             ])
             if result.returncode != 0:
